@@ -6,7 +6,7 @@
 from dataclasses import MISSING
 
 import omni.isaac.lab.sim as sim_utils
-from omni.isaac.lab.assets import ArticulationCfg, AssetBaseCfg
+from omni.isaac.lab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
 from omni.isaac.lab.envs import ManagerBasedRLEnvCfg
 from omni.isaac.lab.managers import ActionTermCfg as ActionTerm
 from omni.isaac.lab.managers import CurriculumTermCfg as CurrTerm
@@ -49,6 +49,8 @@ class ReachSceneCfg(InteractiveSceneCfg):
 
     # robots
     robot: ArticulationCfg = MISSING
+    # object: will be populated by agent env cfg
+    object: RigidObjectCfg = MISSING
 
     # lights
     light = AssetBaseCfg(
@@ -80,6 +82,20 @@ class CommandsCfg:
             yaw=(-3.14, 3.14),
         ),
     )
+    object_pose = mdp.UniformPoseCommandCfg(
+        asset_name="robot",
+        body_name=MISSING,  # will be set by agent env cfg
+        resampling_time_range=(4.0, 4.0),
+        debug_vis=True,
+        ranges=mdp.UniformPoseCommandCfg.Ranges(
+            pos_x=(0.3, 0.8),
+            pos_y=(-0.40, 0.40), 
+            pos_z=(0.10, 0.70), 
+            roll=(0.0, 0.0), 
+            pitch=(0.0, 0.0), 
+            yaw=(0.0, 0.0)
+        ),
+    )
 
 
 @configclass
@@ -101,6 +117,7 @@ class ObservationsCfg:
         # observation terms (order preserved)
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
+        object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame)
         pose_command = ObsTerm(func=mdp.generated_commands, params={"command_name": "ee_pose"})
         actions = ObsTerm(func=mdp.last_action)
 
@@ -125,6 +142,16 @@ class EventCfg:
         },
     )
 
+    reset_object_position = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {"x": (-0.1, 0.1), "y": (-0.25, 0.25), "z": (0.0, 0.0)},
+            "velocity_range": {},
+            "asset_cfg": SceneEntityCfg("object", body_names="object"),
+        },
+    )
+
 
 @configclass
 class RewardsCfg:
@@ -145,6 +172,23 @@ class RewardsCfg:
         func=mdp.orientation_command_error,
         weight=-0.1,
         params={"asset_cfg": SceneEntityCfg("robot", body_names=MISSING), "command_name": "ee_pose"},
+    )
+
+    # Avoid objects penalty
+    end_effector_position_tracking_obs = RewTerm(
+        func=mdp.position_command_error,
+        weight=2e-4,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=MISSING), "command_name": "object_pose"},
+    )
+    end_effector_position_tracking_fine_grained_obs = RewTerm(
+        func=mdp.position_command_error_tanh,
+        weight=-1e-4,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=MISSING), "std": 0.1, "command_name": "object_pose"},
+    )
+    end_effector_orientation_tracking_obs = RewTerm(
+        func=mdp.orientation_command_error,
+        weight=1e-4,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=MISSING), "command_name": "object_pose"},
     )
 
     # action penalty
