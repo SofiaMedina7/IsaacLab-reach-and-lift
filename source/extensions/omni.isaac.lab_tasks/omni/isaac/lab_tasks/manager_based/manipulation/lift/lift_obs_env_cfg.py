@@ -42,6 +42,8 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     # target object: will be populated by agent env cfg
     object: RigidObjectCfg | DeformableObjectCfg = MISSING
 
+    obstacle: RigidObjectCfg = MISSING
+
     # Table
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",
@@ -78,9 +80,29 @@ class CommandsCfg:
         resampling_time_range=(5.0, 5.0),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.4, 0.6), pos_y=(-0.25, 0.25), pos_z=(0.25, 0.5), roll=(0.0, 0.0), pitch=(0.0, 0.0), yaw=(0.0, 0.0)
+            pos_x=(0.4, 0.6),
+            pos_y=(-0.25, 0.25), 
+            pos_z=(0.25, 0.5), 
+            roll=(0.0, 0.0), 
+            pitch=(0.0, 0.0), 
+            yaw=(0.0, 0.0)
         ),
     )
+    obstacle_pose = mdp.UniformPoseCommandCfg(
+        asset_name="robot",
+        body_name=MISSING,  # will be set by agent env cfg
+        resampling_time_range=(4.0, 4.0),
+        debug_vis=True,
+        ranges=mdp.UniformPoseCommandCfg.Ranges(
+            pos_x=(0.3, 0.8),
+            pos_y=(-0.40, 0.40), 
+            pos_z=(0.10, 0.70), 
+            roll=(0.0, 0.0), 
+            pitch=(0.0, 0.0), 
+            yaw=(0.0, 0.0)
+        ),
+    )
+    
 
 
 @configclass
@@ -102,6 +124,7 @@ class ObservationsCfg:
 
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
+        obstacle_position = ObsTerm(func=mdp.object_position_in_robot_root_frame)
         object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame)
         target_object_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "object_pose"})
         actions = ObsTerm(func=mdp.last_action)
@@ -129,15 +152,32 @@ class EventCfg:
             "asset_cfg": SceneEntityCfg("object", body_names="Object"),
         },
     )
+    reset_obstacle_position = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {"x": (-0.1, 0.1), "y": (-0.25, 0.25), "z": (0.0, 0.0)},
+            "velocity_range": {},
+            "asset_cfg": SceneEntityCfg("obstacle", body_names="obstacle"),
+        },
+    )
 
 
 @configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    reaching_object = RewTerm(func=mdp.object_ee_distance, params={"std": 0.1}, weight=1.0)
+    reaching_object = RewTerm(
+        func=mdp.object_ee_distance, 
+        params={"std": 0.1}, 
+        weight=1.0
+    )
 
-    lifting_object = RewTerm(func=mdp.object_is_lifted, params={"minimal_height": 0.04}, weight=15.0)
+    lifting_object = RewTerm(
+        func=mdp.object_is_lifted, 
+        params={"minimal_height": 0.04}, 
+        weight=15.0
+    )
 
     object_goal_tracking = RewTerm(
         func=mdp.object_goal_distance,
@@ -149,6 +189,19 @@ class RewardsCfg:
         func=mdp.object_goal_distance,
         params={"std": 0.05, "minimal_height": 0.04, "command_name": "object_pose"},
         weight=5.0,
+    )
+
+    # Avoid obstacles penalty
+    obstacle_goal_tracking = RewTerm(
+        func=mdp.object_goal_distance,
+        params={"std": 0.3, "minimal_height": 0.04, "command_name": "obstacle_pose"},
+        weight=-5.0,
+    )
+
+    obstacle_goal_tracking_fine_grained = RewTerm(
+        func=mdp.object_goal_distance,
+        params={"std": 0.05, "minimal_height": 0.04, "command_name": "obstacle_pose"},
+        weight=-2.0,
     )
 
     # action penalty
